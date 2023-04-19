@@ -1,9 +1,11 @@
 # AGPL: a notification must be added stating that changes have been made to that file.
 
 import os
+import shutil
 from pathlib import Path
 
 import streamlit as st
+from random import randint
 
 from tortoise.api import MODELS_DIR
 from tortoise.inference import (
@@ -29,30 +31,58 @@ LATENT_MODES = [
     "average per voice file (broken on small files)",
 ]
 
-
 def main():
     conf = TortoiseConfig()
-    ar_checkpoint = st_file_selector(
-        st, path=conf.AR_CHECKPOINT, label="Select GPT Checkpoint", key="pth"
-    )
-    diff_checkpoint = st_file_selector(
-        st,
-        path=conf.DIFF_CHECKPOINT,
-        label="Select Diffusion Checkpoint",
-        key="pth-diff",
-    )
+    
+    with st.expander("Create New Voice", expanded=True):
+        if "file_uploader_key" not in st.session_state:
+            st.session_state["file_uploader_key"] = str(randint(1000, 100000000))
+            st.session_state["text_input_key"] = str(randint(1000, 100000000))
+
+        uploaded_files = st.file_uploader(
+            "Upload Audio Samples for a New Voice",
+            accept_multiple_files=True,
+            type=["wav"],
+            key=st.session_state["file_uploader_key"]
+        )
+
+        voice_name = st.text_input(
+            "New Voice Name",
+            help="Enter a name for your new voice.",
+            value="",
+            key=st.session_state["text_input_key"]
+        )
+
+        create_voice_button = st.button(
+            "Create Voice",
+            disabled = ((voice_name.strip() == "") | (len(uploaded_files) == 0))
+        )
+        if create_voice_button:
+            st.write(st.session_state)
+            with st.spinner(f"Creating new voice: {voice_name}"):
+                new_voice_name = voice_name.strip().replace(" ", "_")
+
+                voices_dir = f'./tortoise/voices/{new_voice_name}/'
+                if os.path.exists(voices_dir):
+                    shutil.rmtree(voices_dir)
+                os.makedirs(voices_dir)
+
+                for index, uploaded_file in enumerate(uploaded_files):
+                    bytes_data = uploaded_file.read()
+                    with open(f"{voices_dir}voice_sample{index}.wav", "wb") as wav_file:
+                        wav_file.write(bytes_data)
+
+                st.session_state["text_input_key"] = str(randint(1000, 100000000))
+                st.session_state["file_uploader_key"] = str(randint(1000, 100000000))
+                st.experimental_rerun()
+
     text = st.text_area(
         "Text",
         help="Text to speak.",
         value="The expressiveness of autoregressive transformers is literally nuts! I absolutely adore them.",
     )
-    extra_voices_dir = st.text_input(
-        "Extra Voices Directory",
-        help="Where to find extra voices for zero-shot VC",
-        value=conf.EXTRA_VOICES_DIR,
-    )
 
-    voices, extra_voices_ls = list_voices(extra_voices_dir)
+    voices = [v for v in os.listdir("tortoise/voices") if v != "cond_latent_example"]
 
     voice = st.selectbox(
         "Voice",
@@ -82,7 +112,7 @@ def main():
             candidates = st.number_input(
                 "Candidates",
                 help="How many output candidates to produce per-voice.",
-                value=3,
+                value=1,
             )
             latent_averaging_mode = st.radio(
                 "Latent averaging mode",
@@ -92,7 +122,8 @@ def main():
             )
             sampler = st.radio(
                 "Sampler",
-                SAMPLERS,
+                #SAMPLERS,
+                ["dpm++2m", "p", "ddim"],
                 help="Diffusion sampler. Note that dpm++2m is experimental and typically requires more steps.",
                 index=1,
             )
@@ -117,19 +148,13 @@ def main():
             output_path = st.text_input(
                 "Output Path", help="Where to store outputs.", value="results/"
             )
-            model_dir = st.text_input(
-                "Model Directory",
-                help="Where to find pretrained model checkpoints. Tortoise automatically downloads these to .models, so this"
-                "should only be specified if you have custom checkpoints.",
-                value=MODELS_DIR,
-            )
 
         with col2:
             """#### Optimizations"""
             high_vram = not st.checkbox(
                 "Low VRAM",
                 help="Re-enable default offloading behaviour of tortoise",
-                value=conf.LOW_VRAM,
+                value=True,
             )
             half = st.checkbox(
                 "Half-Precision",
@@ -167,6 +192,9 @@ def main():
                 help="Whether or not to produce debug_state.pth, which can aid in reproducing problems. Defaults to true.",
                 value=True,
             )
+
+    ar_checkpoint = "."
+    diff_checkpoint = "." 
     if st.button("Update Basic Settings"):
         conf.update(
             EXTRA_VOICES_DIR=extra_voices_dir,
@@ -175,9 +203,9 @@ def main():
             DIFF_CHECKPOINT=diff_checkpoint,
         )
 
-    ar_checkpoint = None if ar_checkpoint[-4:] != ".pth" else ar_checkpoint
-    diff_checkpoint = None if diff_checkpoint[-4:] != ".pth" else diff_checkpoint
-    tts = load_model(model_dir, high_vram, kv_cache, ar_checkpoint, diff_checkpoint)
+    ar_checkpoint = None
+    diff_checkpoint = None
+    tts = load_model(MODELS_DIR, high_vram, kv_cache, ar_checkpoint, diff_checkpoint)
 
     if st.button("Start"):
         assert latent_averaging_mode
@@ -209,7 +237,7 @@ def main():
                 else:
                     voice_sel = [selected_voice]
                 voice_samples, conditioning_latents = load_voice_conditionings(
-                    voice_sel, extra_voices_ls
+                    voice_sel, []
                 )
 
                 voice_path = Path(os.path.join(output_path, selected_voice))
