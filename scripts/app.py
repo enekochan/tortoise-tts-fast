@@ -105,6 +105,9 @@ def main():
         help="Which voice preset to use.",
         index=1,
     )
+    ar_checkpoint = st_file_selector(
+        st, path=".", label="Select GPT Checkpoint", key="pth"
+    )
     with st.expander("Advanced"):
         col1, col2 = st.columns(2)
         with col1:
@@ -193,8 +196,8 @@ def main():
                 value=True,
             )
 
-    ar_checkpoint = "."
-    diff_checkpoint = "." 
+    diff_checkpoint = "."
+    extra_voices_dir = "."
     if st.button("Update Basic Settings"):
         conf.update(
             EXTRA_VOICES_DIR=extra_voices_dir,
@@ -203,7 +206,7 @@ def main():
             DIFF_CHECKPOINT=diff_checkpoint,
         )
 
-    ar_checkpoint = None
+    ar_checkpoint = None if ar_checkpoint[-4:] != ".pth" else ar_checkpoint
     diff_checkpoint = None
     tts = load_model(MODELS_DIR, high_vram, kv_cache, ar_checkpoint, diff_checkpoint)
 
